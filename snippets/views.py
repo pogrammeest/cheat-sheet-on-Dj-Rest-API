@@ -1,8 +1,9 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.response import Response
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.parsers import JSONParser
 from rest_framework.views import APIView
 from snippets.models import Snippet
@@ -12,20 +13,21 @@ from rest_framework import mixins
 from rest_framework import generics, renderers
 from django.contrib.auth.models import User
 from rest_framework import permissions
-from snippets.permissions import IsOwner  # custom permissions
+from snippets.permissions import IsOwner, IsOwnerOrAdmin  # custom permissions
 from rest_framework.response import Response
 from rest_framework.reverse import reverse
 from rest_framework import viewsets
 from rest_framework import generics
 from rest_framework.decorators import action
+from django.core.exceptions import PermissionDenied
 
 
-@api_view(['GET'])
-def api_root(request, format=None):
-    return Response({
-        'users': reverse('user-list', request=request, format=format),
-        'snippets': reverse('snippet-list', request=request, format=format)
-    })
+# @api_view(['GET'])
+# def api_root(request, format=None):
+#     return Response({
+#         'users': reverse('user-list', request=request, format=format),
+#         'snippets': reverse('snippet-list', request=request, format=format)
+#     })
 
 
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
@@ -34,6 +36,7 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = User.objects.all()
     serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
 
 # class UserList(generics.ListAPIView):
@@ -55,15 +58,31 @@ class SnippetViewSet(viewsets.ModelViewSet):
     """
     queryset = Snippet.objects.all()
     serializer_class = SnippetSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwner]
+
+    # permission_classes = [IsOwnerOrAdmin]
 
     @action(detail=True, renderer_classes=[renderers.StaticHTMLRenderer])
-    def highlight(self, request, *args, **kwargs):
-        snippet = self.get_object()
+    def highlight(self, request, pk=None, *args, **kwargs):
+        snippet = get_object_or_404(Snippet.objects.all(), pk=pk)
         return Response(snippet.highlighted)
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
+
+    def get_permissions(self):
+        """
+        Instantiates and returns the list of permissions that this view requires.
+        """
+        if self.action == 'list':
+            permission = [permissions.IsAuthenticatedOrReadOnly]
+        elif self.action == 'retrieve':
+            permission = [permissions.IsAuthenticated]
+        elif self.action == 'highlight':
+            permission = [IsOwnerOrAdmin]
+        else:
+            permission = [permissions.IsAdminUser]
+
+        return [permission() for permission in permission]
 
 
 # class SnippetHighlight(generics.GenericAPIView):
